@@ -42,10 +42,13 @@ class MarantecOpener : public cover::Cover, public Component, public uart::UARTD
   uint8_t counter_{};
 
   uint32_t last_rx_msg_{0};
+  uint32_t last_wakeup_call_{0};
   bool read_next_msg(uint8_t *data);
   bool read_next_msg(uint8_t *data, uint16_t timeout_ms);
   cover::CoverOperation enqueued_command_{cover::COVER_OPERATION_IDLE};
   cover::CoverOperation previous_operation{cover::COVER_OPERATION_IDLE};
+
+  void wakeup_bus_();
 };
 
 }  // namespace marantec_opener

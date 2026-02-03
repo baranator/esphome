@@ -11,6 +11,7 @@ static const char *const TAG = "marantec_opener.cover";
 static const uint8_t RX_MSG_LEN = 5;
 static const uint8_t TX_MSG_LEN = 5;
 static const uint8_t GAP_BETWEEN_MSG_MS = 90;
+static const uint8_t COMMAND_WAKEUP[] = {0x00};
 static const uint8_t COMMAND_CLOSE[] = {0x6A, 0x01, 0x01, 0x08, 0xD2};
 static const uint8_t COMMAND_OPEN[] = {0x6A, 0x01, 0x01, 0x10, 0xA1};
 static const uint8_t COMMAND_IDLEA[] = {0x6A, 0x01, 0x01, 0x00, 0x3E};
@@ -74,7 +75,7 @@ void MarantecOpener::setup() {
   // if opener is not awake, trigger wakeup and read again
   if (!r) {
     // ESP_LOGD(TAG, "opener is not awake, trigger wakeup and read again");
-    this->write_byte(0x00);
+    this->wakeup_bus_();
     r = read_next_msg(data_msg, 2 * GAP_BETWEEN_MSG_MS);
   }
 
@@ -118,11 +119,9 @@ void MarantecOpener::endstop_reached_(CoverOperation operation) {
   if (new_position != this->position || this->current_operation != COVER_OPERATION_IDLE) {
     this->position = new_position;
     this->current_operation = COVER_OPERATION_IDLE;
-    if (this->last_command_ == operation) {
-      float dur = (float) (now - this->start_dir_time_) / 1e3f;
-      ESP_LOGD(TAG, "'%s' - %s endstop reached. Took %.1fs.", this->name_.c_str(),
-               operation == COVER_OPERATION_OPENING ? "Open" : "Close", dur);
-    }
+    float dur = (float) (now - this->start_dir_time_) / 1e3f;
+    ESP_LOGD(TAG, "'%s' - %s endstop reached. Took %.1fs.", this->name_.c_str(),
+             operation == COVER_OPERATION_OPENING ? "Open" : "Close", dur);
     this->publish_state();
   }
 }
@@ -134,6 +133,7 @@ void MarantecOpener::set_current_operation_(cover::CoverOperation operation) {
     this->current_operation = operation;
     if (operation != COVER_OPERATION_IDLE) {
       this->last_recompute_time_ = millis();
+      this->start_dir_time_ = millis();
     }
     if (prev_op != this->current_operation) {
       this->previous_operation = prev_op;
@@ -172,69 +172,72 @@ void MarantecOpener::update_() {
   if (this->current_operation != COVER_OPERATION_IDLE) {
     this->recompute_position_();
 
-    // if we initiated the move, check if we reached the target position
-    if (this->last_command_ != COVER_OPERATION_IDLE) {
-      if (this->is_at_target_()) {
-        this->start_direction_(COVER_OPERATION_IDLE);
-      }
+    // check if we reached the target position
+    if (this->is_at_target_()) {
+      this->start_direction_(COVER_OPERATION_IDLE);
     }
+  }
+}
+
+void MarantecOpener::wakeup_bus_() {
+  if (millis() - this->last_rx_msg_ > 10 * GAP_BETWEEN_MSG_MS &&
+      millis() - this->last_wakeup_call_ > 2 * GAP_BETWEEN_MSG_MS) {
+    // if bus / motor is idle send wakeup
+    ESP_LOGD(TAG, "Wakeup bus");
+    this->write_array(COMMAND_WAKEUP, 1);
+    this->last_wakeup_call_ = millis();
+    // this->flush();
+    delay(10);
   }
 }
 
 void MarantecOpener::loop() {
   uint8_t data[RX_MSG_LEN];
-  // ESP_LOGD(TAG, "loopiii-call");
 
   if (read_next_msg(data)) {
-    // ESP_LOGD(TAG, "readmsg-call");
-    // this->last_rx_msg_=millis();
+    // ESP_LOGD(TAG, "read package succ");
     this->process_rx_(data);  // TODO: does this take too long?
     // ESP_LOGD(TAG, "time since last send: %u",millis() - this->last_rx_msg_);
   }
 
-  while (millis() - this->last_rx_msg_ <= 16) {
-    delay(1);
-  }
-  // send enqueued command
-  if (this->enqueued_command_ != COVER_OPERATION_IDLE &&
-      (millis() - this->last_rx_msg_ < 30 && millis() - this->last_rx_msg_ > 15 ||
-       millis() - this->last_rx_msg_ > 10 * GAP_BETWEEN_MSG_MS)) {
-    // enque command only if we are just in a silent slot, max 40ms after end of last msg OR when bus is idle/silent for
-    // 10 cycles
-    uint32_t startt = millis();
-    if (this->enqueued_command_ == COVER_OPERATION_OPENING) {
-      this->write_array(COMMAND_OPEN, TX_MSG_LEN);
-      // keepalive_count=100;
-    } else if (this->enqueued_command_ == COVER_OPERATION_CLOSING) {
-      this->write_array(COMMAND_CLOSE, TX_MSG_LEN);
-      // keepalive_count=100;
-    } else {
-      // if(keepalive_count>0){
-      //   this->write_array(COMMAND_IDLEA,TX_MSG_LEN);
-      //   keepalive_count--;
-      // }
+  if (this->enqueued_command_ != COVER_OPERATION_IDLE) {
+    // ESP_LOGD(TAG,"command needs to be send");
+    this->wakeup_bus_();
+
+    // send enqueued command
+    if (millis() - this->last_rx_msg_ < 30) {
+      ESP_LOGD(TAG, "in correct time slot for sending command, do so");
+      // enque command only if we are just in a silent slot, max 40ms after end of last msg OR when bus is idle/silent
+      // for
+      while (millis() - this->last_rx_msg_ <= 16) {
+        delay(1);
+      }
+      uint32_t startt = millis();
+      if (this->enqueued_command_ == COVER_OPERATION_OPENING) {
+        this->write_array(COMMAND_OPEN, TX_MSG_LEN);
+        // this->flush();
+        //  keepalive_count=100;
+      } else if (this->enqueued_command_ == COVER_OPERATION_CLOSING) {
+        this->write_array(COMMAND_CLOSE, TX_MSG_LEN);
+        // this->flush();
+      }
+
+      ESP_LOGD(TAG, "Wrote command %s to serial..duration: %u ms, offset after receive %u",
+               this->enqueued_command_ == COVER_OPERATION_OPENING   ? "OPEN"
+               : this->enqueued_command_ == COVER_OPERATION_CLOSING ? "CLOSE"
+                                                                    : "STOP",
+               millis() - startt, startt - this->last_rx_msg_);
+
+      this->enqueued_command_ = COVER_OPERATION_IDLE;
     }
-
-    ESP_LOGD(TAG, "Wrote command %s to serial..duration: %u ms, offset after receive %u",
-             this->enqueued_command_ == COVER_OPERATION_OPENING   ? "OPEN"
-             : this->enqueued_command_ == COVER_OPERATION_CLOSING ? "CLOSE"
-                                                                  : "STOP",
-             millis() - startt, startt - this->last_rx_msg_);
-
-    this->start_dir_time_ = millis();
-    this->enqueued_command_ = COVER_OPERATION_IDLE;
   }
 }
 
 void MarantecOpener::control(const CoverCall &call) {
-  // TODO: Dead for testing
-
   if (call.get_stop()) {
     this->start_direction_(COVER_OPERATION_IDLE);
   } else if (call.get_toggle().has_value()) {
     // toggle action logic: OPEN - STOP - CLOSE
-    // TODO
-    return;
 
     if (this->current_operation != COVER_OPERATION_IDLE) {
       this->start_direction_(COVER_OPERATION_IDLE);
@@ -271,7 +274,7 @@ bool MarantecOpener::is_at_target_() const {
   if (this->target_position_ == COVER_OPEN || this->target_position_ == COVER_CLOSED)
     return false;
   // aiming for an intermediate position - exact comparison here will not work and we need to allow for overshoot
-  switch (this->last_command_) {
+  switch (this->current_operation) {
     case COVER_OPERATION_OPENING:
       return this->position >= this->target_position_;
     case COVER_OPERATION_CLOSING:
@@ -284,8 +287,6 @@ bool MarantecOpener::is_at_target_() const {
 }
 
 void MarantecOpener::start_direction_(CoverOperation dir) {
-  this->last_command_ = dir;
-
   ESP_LOGD(TAG, "'%s' - Direction '%s' requested.", this->name_.c_str(),
            dir == COVER_OPERATION_OPENING   ? "OPEN"
            : dir == COVER_OPERATION_CLOSING ? "CLOSE"
@@ -294,20 +295,11 @@ void MarantecOpener::start_direction_(CoverOperation dir) {
   if (this->current_operation == dir) {
     ESP_LOGD(TAG, "No change in direction, dont do anything");
     return;
+  } else {
+    // if the cover is moving, both open and close commands are interpreted as a
+    // stop (use close here). The if above ensures that a pause request when the cover is paused
+    this->enqueued_command_ = (dir != COVER_OPERATION_IDLE) ? dir : COVER_OPERATION_CLOSING;
   }
-
-  this->enqueued_command_ = (dir != COVER_OPERATION_IDLE) ? dir : COVER_OPERATION_CLOSING;
-
-  // if(dir == COVER_OPERATION_CLOSING){
-  //   this->enqueued_command_ = COMMAND_CLOSE;
-  // }else if(dir == COVER_OPERATION_OPENING){
-  //   this->enqueued_command_ = COMMAND_OPEN;
-  // }else{
-  //     // if the cover is moving, both open and close commands are interpreted as a
-  //     // stop (use close here). The if above ensures that a pause request when the cover is paused
-  //     // wont get here and falsely close the cover
-  //     this->enqueued_command_ = COMMAND_CLOSE;
-  // }
 }
 
 void MarantecOpener::recompute_position_() {
