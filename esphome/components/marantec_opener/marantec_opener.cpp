@@ -294,10 +294,9 @@ void MarantecOpener::start_direction_(CoverOperation dir) {
 
   if (this->current_operation == dir) {
     ESP_LOGD(TAG, "No change in direction, dont do anything");
-    return;
   } else {
     // if the cover is moving, both open and close commands are interpreted as a
-    // stop (use close here). The if above ensures that a pause request when the cover is paused
+    // stop (use close here).
     this->enqueued_command_ = (dir != COVER_OPERATION_IDLE) ? dir : COVER_OPERATION_CLOSING;
   }
 }
