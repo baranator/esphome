@@ -76,7 +76,7 @@ void MarantecOpener::setup() {
   if (!r) {
     // ESP_LOGD(TAG, "opener is not awake, trigger wakeup and read again");
     this->wakeup_bus_();
-    r = read_next_msg(data_msg, 2 * GAP_BETWEEN_MSG_MS);
+    r = read_next_msg(data_msg, 3 * GAP_BETWEEN_MSG_MS);
   }
 
   if (r) {
@@ -181,7 +181,7 @@ void MarantecOpener::update_() {
 
 void MarantecOpener::wakeup_bus_() {
   if (millis() - this->last_rx_msg_ > 10 * GAP_BETWEEN_MSG_MS &&
-      millis() - this->last_wakeup_call_ > 2 * GAP_BETWEEN_MSG_MS) {
+      millis() - this->last_wakeup_call_ > 3 * GAP_BETWEEN_MSG_MS) {
     // if bus / motor is idle send wakeup
     ESP_LOGD(TAG, "Wakeup bus");
     this->write_array(COMMAND_WAKEUP, 1);
