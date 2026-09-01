@@ -103,8 +103,8 @@ void UDPComponent::setup() {
 }
 
 void UDPComponent::loop() {
-  auto buf = std::vector<uint8_t>(MAX_PACKET_SIZE);
   if (this->should_listen_) {
+    std::array<uint8_t, MAX_PACKET_SIZE> buf;
     for (;;) {
 #if defined(USE_SOCKET_IMPL_BSD_SOCKETS) || defined(USE_SOCKET_IMPL_LWIP_SOCKETS)
       auto len = this->listen_socket_->read(buf.data(), buf.size());
@@ -116,9 +116,9 @@ void UDPComponent::loop() {
 #endif
       if (len <= 0)
         break;
-      buf.resize(len);
-      ESP_LOGV(TAG, "Received packet of length %zu", len);
-      this->packet_listeners_.call(buf);
+      size_t packet_len = static_cast<size_t>(len);
+      ESP_LOGV(TAG, "Received packet of length %zu", packet_len);
+      this->packet_listeners_.call(std::span<const uint8_t>(buf.data(), packet_len));
     }
   }
 }
@@ -129,8 +129,9 @@ void UDPComponent::dump_config() {
                 "  Listen Port: %u\n"
                 "  Broadcast Port: %u",
                 this->listen_port_, this->broadcast_port_);
-  for (const char *address : this->addresses_)
+  for (const char *address : this->addresses_) {
     ESP_LOGCONFIG(TAG, "  Address: %s", address);
+  }
   if (this->listen_address_.has_value()) {
     char addr_buf[network::IP_ADDRESS_BUFFER_SIZE];
     ESP_LOGCONFIG(TAG, "  Listen address: %s", this->listen_address_.value().str_to(addr_buf));
@@ -145,8 +146,9 @@ void UDPComponent::send_packet(const uint8_t *data, size_t size) {
 #if defined(USE_SOCKET_IMPL_BSD_SOCKETS) || defined(USE_SOCKET_IMPL_LWIP_SOCKETS)
   for (const auto &saddr : this->sockaddrs_) {
     auto result = this->broadcast_socket_->sendto(data, size, 0, &saddr, sizeof(saddr));
-    if (result < 0)
+    if (result < 0) {
       ESP_LOGW(TAG, "sendto() error %d", errno);
+    }
   }
 #endif
 #ifdef USE_SOCKET_IMPL_LWIP_TCP
@@ -155,8 +157,9 @@ void UDPComponent::send_packet(const uint8_t *data, size_t size) {
     if (this->udp_client_.beginPacketMulticast(saddr, this->broadcast_port_, iface, 128) != 0) {
       this->udp_client_.write(data, size);
       auto result = this->udp_client_.endPacket();
-      if (result == 0)
+      if (result == 0) {
         ESP_LOGW(TAG, "udp.write() error");
+      }
     }
   }
 #endif

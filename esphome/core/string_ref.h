@@ -76,10 +76,40 @@ class StringRef {
   constexpr bool empty() const { return len_ == 0; }
   constexpr const_reference operator[](size_type pos) const { return *(base_ + pos); }
 
+  /// True if the view begins with the given prefix (std::string::starts_with-like)
+  bool starts_with(const StringRef &prefix) const {
+    return len_ >= prefix.len_ && std::memcmp(base_, prefix.base_, prefix.len_) == 0;
+  }
+  bool starts_with(const char *prefix) const { return this->starts_with(StringRef(prefix)); }
+  bool starts_with(const std::string &prefix) const { return this->starts_with(StringRef(prefix)); }
+
+  /// Copy characters to destination buffer (std::string::copy-like, but returns 0 instead of throwing on out-of-range)
+  size_type copy(char *dest, size_type count, size_type pos = 0) const {
+    if (pos >= len_)
+      return 0;
+    size_type actual = (count > len_ - pos) ? len_ - pos : count;
+    std::memcpy(dest, base_ + pos, actual);
+    return actual;
+  }
+
   std::string str() const { return std::string(base_, len_); }
   const uint8_t *byte() const { return reinterpret_cast<const uint8_t *>(base_); }
 
   operator std::string() const { return str(); }
+
+  /// Compare (compatible with std::string::compare)
+  int compare(const StringRef &other) const {
+    int result = std::memcmp(base_, other.base_, std::min(len_, other.len_));
+    if (result != 0)
+      return result;
+    if (len_ < other.len_)
+      return -1;
+    if (len_ > other.len_)
+      return 1;
+    return 0;
+  }
+  int compare(const char *s) const { return compare(StringRef(s)); }
+  int compare(const std::string &s) const { return compare(StringRef(s)); }
 
   /// Find first occurrence of substring, returns std::string::npos if not found.
   /// Note: Requires the underlying string to be null-terminated.
@@ -209,7 +239,9 @@ template<typename R, typename F> inline R parse_number(const StringRef &str, siz
 }
 // NOLINTEND(google-runtime-int)
 }  // namespace internal
-// NOLINTBEGIN(readability-identifier-naming,google-runtime-int)
+// readability-non-const-parameter: `pos` is written through by internal::parse_number, one call
+// frame away; the check only inspects these bodies, so it wrongly proposes `const size_t *`.
+// NOLINTBEGIN(readability-identifier-naming,google-runtime-int,readability-non-const-parameter)
 inline int stoi(const StringRef &str, size_t *pos = nullptr, int base = 10) {
   return static_cast<int>(internal::parse_number<long>(str, pos, base, std::strtol));
 }
@@ -222,7 +254,7 @@ inline float stof(const StringRef &str, size_t *pos = nullptr) {
 inline double stod(const StringRef &str, size_t *pos = nullptr) {
   return internal::parse_number<double>(str, pos, std::strtod);
 }
-// NOLINTEND(readability-identifier-naming,google-runtime-int)
+// NOLINTEND(readability-identifier-naming,google-runtime-int,readability-non-const-parameter)
 
 #ifdef USE_JSON
 // NOLINTNEXTLINE(readability-identifier-naming)

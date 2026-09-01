@@ -39,14 +39,11 @@ uint32_t MQTTSensorComponent::get_expire_after() const {
     return *this->expire_after_;
   return 0;
 }
-void MQTTSensorComponent::set_expire_after(uint32_t expire_after) { this->expire_after_ = expire_after; }
-void MQTTSensorComponent::disable_expire_after() { this->expire_after_ = 0; }
 
 void MQTTSensorComponent::send_discovery(JsonObject root, mqtt::SendDiscoveryConfig &config) {
   // NOLINTBEGIN(clang-analyzer-cplusplus.NewDeleteLeaks) false positive with ArduinoJson
-  const auto device_class = this->sensor_->get_device_class_ref();
-  if (!device_class.empty()) {
-    root[MQTT_DEVICE_CLASS] = device_class;
+  if (this->sensor_->has_accuracy_decimals()) {
+    root[MQTT_SUGGESTED_DISPLAY_PRECISION] = this->sensor_->get_accuracy_decimals();
   }
 
   const auto unit_of_measurement = this->sensor_->get_unit_of_measurement_ref();

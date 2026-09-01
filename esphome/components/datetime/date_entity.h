@@ -91,12 +91,14 @@ class DateCall {
 
   DateEntity *parent_;
 
-  optional<int16_t> year_;
+  optional<uint16_t> year_;
   optional<uint8_t> month_;
   optional<uint8_t> day_;
 };
 
-template<typename... Ts> class DateSetAction : public Action<Ts...>, public Parented<DateEntity> {
+inline DateCall DateEntity::make_call() { return DateCall(this); }
+
+template<typename... Ts> class DateSetAction final : public Action<Ts...>, public Parented<DateEntity> {
  public:
   TEMPLATABLE_VALUE(ESPTime, date)
 
