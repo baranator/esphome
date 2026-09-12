@@ -14,8 +14,8 @@ class MarantecOpener : public cover::Cover, public Component, public uart::UARTD
   void loop() override;
   void dump_config() override;
 
-  void set_open_duration(uint32_t duration) { this->open_duration_ = duration; }
-  void set_close_duration(uint32_t duration) { this->close_duration_ = duration; }
+  // void set_open_duration(uint32_t duration) { this->open_duration_ = duration; }
+  // void set_close_duration(uint32_t duration) { this->close_duration_ = duration; }
 
   cover::CoverTraits get_traits() override;
 
@@ -23,14 +23,14 @@ class MarantecOpener : public cover::Cover, public Component, public uart::UARTD
   void update_();
   void control(const cover::CoverCall &call) override;
   bool is_at_target_() const;
-  void start_direction_(cover::CoverOperation dir);
+  void enqueue_command_(cover::CoverOperation dir);
   void endstop_reached_(cover::CoverOperation operation);
   void recompute_position_();
-  void set_current_operation_(cover::CoverOperation operation);
+  void set_current_operation_(cover::CoverOperation operation, float pos);
   void process_rx_(uint8_t *data);
 
-  unsigned open_duration_{0};
-  unsigned close_duration_{0};
+  unsigned open_duration_{20000};
+  unsigned close_duration_{20000};
   unsigned toggles_needed_{0};
   // cover::CoverOperation next_direction_{cover::COVER_OPERATION_IDLE};
   cover::CoverOperation last_command_{cover::COVER_OPERATION_IDLE};
