@@ -21,7 +21,7 @@ using namespace esphome::cover;
 bool from_endstop = false;
 float from_which_endstop = COVER_CLOSED;
 unsigned long from_endstop_ts = 0;
-
+bool coasting = false;
 bool MarantecOpener::read_next_msg(uint8_t *data) {
   uint8_t pb;
 
@@ -166,6 +166,7 @@ void MarantecOpener::process_rx_(uint8_t *msg) {
   ESP_LOGD(TAG, "Process RX data %02X %02X %02X %02X %02X", msg[0], msg[1], msg[2], msg[3], msg[4]);
 
   if (msg[0] == 0xEA && msg[1] == 0x01 && msg[2] == 0x0A) {
+    coasting = false;
     if (msg[3] == 0x04 && msg[4] == 0xBE) {
       // idle at closed endstop
       this->set_current_operation_(COVER_OPERATION_IDLE, COVER_CLOSED);
@@ -184,6 +185,7 @@ void MarantecOpener::process_rx_(uint8_t *msg) {
   } else if (msg[0] == 0xEA && msg[1] == 0x01 && msg[2] == 0x0B) {
     // special state between moving and stopped - maybe sth. like the motor coasting to stop?
     // ignore for now
+    coasting = true;
   }
 }
 
@@ -193,7 +195,7 @@ void MarantecOpener::update_() {
     this->recompute_position_();
 
     // check if we reached the target position
-    if (this->is_at_target_()) {
+    if (this->is_at_target_() && !coasting) {
       this->enqueue_command_(COVER_OPERATION_IDLE);
     }
   }
@@ -207,7 +209,7 @@ void MarantecOpener::wakeup_bus_() {
     this->write_array(COMMAND_WAKEUP, 1);
     this->last_wakeup_call_ = millis();
     // this->flush();
-    delay(10);
+    delay(5);
   }
 }
 
@@ -278,9 +280,9 @@ void MarantecOpener::control(const CoverCall &call) {
     if (abs(pos - this->position) >= 0.1) {
       this->target_position_ = pos;
       if (pos < this->position) {
-        this->start_direction_(COVER_OPERATION_CLOSING);
+        this->enqueue_command_(COVER_OPERATION_CLOSING);
       } else {
-        this->start_direction_(COVER_OPERATION_OPENING);
+        this->enqueue_command_(COVER_OPERATION_OPENING);
       }
     }
   }
@@ -318,12 +320,13 @@ void MarantecOpener::enqueue_command_(CoverOperation dir) {
     if (dir != COVER_OPERATION_IDLE) {
       this->enqueued_command_ = dir;
     } else {
-      if (this->previous_operation == COVER_OPERATION_CLOSING) {
+      if (this->current_operation == COVER_OPERATION_CLOSING) {
         this->enqueued_command_ = COVER_OPERATION_CLOSING;
       } else {
         this->enqueued_command_ = COVER_OPERATION_OPENING;
       }
     }
+    ESP_LOGD(TAG, "command %s was enqueued ", print_operation(this->enqueued_command_));
   }
 }
 
