@@ -22,6 +22,8 @@ bool from_endstop = false;
 float from_which_endstop = COVER_CLOSED;
 unsigned long from_endstop_ts = 0;
 bool coasting = false;
+bool external_cmd = true;
+
 bool MarantecOpener::read_next_msg(uint8_t *data) {
   uint8_t pb;
 
@@ -99,7 +101,7 @@ CoverTraits MarantecOpener::get_traits() {
   return traits;
 }
 
-char *print_operation(CoverOperation o) {
+const char *print_operation(CoverOperation o) {
   switch (o) {
     case COVER_OPERATION_IDLE:
       return "IDLE";
@@ -122,6 +124,22 @@ void MarantecOpener::set_current_operation_(cover::CoverOperation operation, flo
     this->previous_operation = this->current_operation;
     this->current_operation = operation;
     this->position = pos;
+
+    if (external_cmd) {
+      // for external triggered up/down set the target to the endposition
+      ESP_LOGD(TAG, "external command is being processed: %s", print_operation(operation));
+      if (operation == COVER_OPERATION_OPENING) {
+        this->target_position_ = COVER_OPEN;
+      } else if (operation == COVER_OPERATION_CLOSING) {
+        this->target_position_ = COVER_CLOSED;
+      }
+    }
+
+    if (operation == COVER_OPERATION_OPENING || operation == COVER_OPERATION_CLOSING) {
+      // after an operation-change caused by any source (internal or external button) reset flag, so that every
+      // following change is considered to be external do this only for up/down as idle can be triggered by the endstops
+      external_cmd = true;
+    }
 
     if (operation != COVER_OPERATION_IDLE) {
       this->last_recompute_time_ = millis();
@@ -245,7 +263,7 @@ void MarantecOpener::loop() {
         // this->flush();
       }
 
-      ESP_LOGD(TAG, "Wrote command %s to serial..duration: %u ms, offset after receive %u",
+      ESP_LOGD(TAG, "Wrote command %s to serial..duration: %lu ms, offset after receive %lu",
                print_operation(this->enqueued_command_), millis() - startt, startt - this->last_rx_msg_);
 
       this->enqueued_command_ = COVER_OPERATION_IDLE;
@@ -258,11 +276,13 @@ void MarantecOpener::loop() {
 void MarantecOpener::control(const CoverCall &call) {
   if (call.get_stop()) {
     this->enqueue_command_(COVER_OPERATION_IDLE);
+    external_cmd = false;
   } else if (call.get_toggle().has_value()) {
     // toggle action logic: OPEN - STOP - CLOSE
 
     if (this->current_operation != COVER_OPERATION_IDLE) {
       this->enqueue_command_(COVER_OPERATION_IDLE);
+
     } else {
       // motor was idle look back to last state
       if (this->previous_operation == COVER_OPERATION_OPENING) {
@@ -271,6 +291,7 @@ void MarantecOpener::control(const CoverCall &call) {
         this->enqueue_command_(COVER_OPERATION_OPENING);
       }
     }
+    external_cmd = false;
 
   } else if (call.get_position().has_value()) {
     // go to position action
@@ -284,6 +305,7 @@ void MarantecOpener::control(const CoverCall &call) {
       } else {
         this->enqueue_command_(COVER_OPERATION_OPENING);
       }
+      external_cmd = false;
     }
   }
 }
