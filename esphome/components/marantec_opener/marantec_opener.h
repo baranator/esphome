@@ -25,23 +25,20 @@ class MarantecOpener : public cover::Cover, public Component, public uart::UARTD
   void recompute_position_();
   void set_current_operation_(cover::CoverOperation operation, float pos);
   void process_rx_(uint8_t *data);
+  bool wakeup_bus_();
+  bool read_next_msg(uint8_t *data);
+  bool read_next_msg(uint8_t *data, uint16_t timeout_ms);
 
   unsigned open_duration_{20000};
   unsigned close_duration_{20000};
-  cover::CoverOperation last_command_{cover::COVER_OPERATION_IDLE};
-
   uint32_t last_recompute_time_{0};
   uint32_t start_dir_time_{0};
   float target_position_{0};
-
   uint32_t last_rx_msg_{0};
   uint32_t last_wakeup_call_{0};
-  bool read_next_msg(uint8_t *data);
-  bool read_next_msg(uint8_t *data, uint16_t timeout_ms);
+  cover::CoverOperation last_command_{cover::COVER_OPERATION_IDLE};
   cover::CoverOperation enqueued_command_{cover::COVER_OPERATION_IDLE};
   cover::CoverOperation previous_operation{cover::COVER_OPERATION_IDLE};
-
-  void wakeup_bus_();
 };
 
 }  // namespace marantec_opener

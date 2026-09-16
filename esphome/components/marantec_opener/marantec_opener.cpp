@@ -11,6 +11,7 @@ static const char *const TAG = "marantec_opener.cover";
 static const uint8_t RX_MSG_LEN = 5;
 static const uint8_t TX_MSG_LEN = 5;
 static const uint8_t GAP_BETWEEN_MSG_MS = 90;
+// static const uint8_t COMMAND_WAKEUP[] = {0x6A,0x01,0x01,0x00,0x3E};
 static const uint8_t COMMAND_WAKEUP[] = {0x00};
 static const uint8_t COMMAND_CLOSE[] = {0x6A, 0x01, 0x01, 0x08, 0xD2};
 static const uint8_t COMMAND_OPEN[] = {0x6A, 0x01, 0x01, 0x10, 0xA1};
@@ -40,7 +41,6 @@ bool MarantecOpener::read_next_msg(uint8_t *data) {
     }
 
     this->last_rx_msg_ = millis();
-    // this->process_rx_(data);
 
     return true;
   }
@@ -63,22 +63,30 @@ bool MarantecOpener::read_next_msg(uint8_t *data, uint16_t timeout_ms) {
 
 void MarantecOpener::setup() {
   // delay(5000);
-  // ESP_LOGE(TAG, "staofsetup");
+  ESP_LOGD(TAG, "start of setup");
   // get actual value
   uint8_t data_msg[RX_MSG_LEN];
 
   bool r = read_next_msg(data_msg, 2 * GAP_BETWEEN_MSG_MS);
+
   // ESP_LOGD(TAG, "midofsetup");
   // if opener is not awake, trigger wakeup and read again
+  int failcount = 0;
   if (!r) {
     ESP_LOGD(TAG, "STARTUP: opener is not awake, trigger wakeup and read again");
-    r = read_next_msg(data_msg, 5000);
+    while (!this->wakeup_bus_() && failcount < 5) {
+      failcount++;
+      ESP_LOGD(TAG, "STARTUP: wakeup triggered, waiting for successful read (try #%i)", failcount);
+      // only continue if the bus is awake/active, otherwise  start over
+      delay(5);
+      r = read_next_msg(data_msg, 2000);
+    }
   }
 
   if (r) {
     process_rx_(data_msg);
   } else {
-    ESP_LOGD(TAG, "STARTUP: initial state could not be retrieved. Check pin-config & connection. Using default values");
+    ESP_LOGE(TAG, "STARTUP: initial state could not be retrieved. Check pin-config & connection. Using default values");
     this->position = COVER_CLOSED;
     this->current_operation = COVER_OPERATION_IDLE;
   }
@@ -219,23 +227,32 @@ void MarantecOpener::update_() {
   }
 }
 
-void MarantecOpener::wakeup_bus_() {
-  if (millis() - this->last_rx_msg_ > 10 * GAP_BETWEEN_MSG_MS &&
-      millis() - this->last_wakeup_call_ > 3 * GAP_BETWEEN_MSG_MS) {
-    // if bus / motor is idle send wakeup
-    ESP_LOGD(TAG, "Wakeup bus");
-    this->write_array(COMMAND_WAKEUP, 1);
-    this->last_wakeup_call_ = millis();
-    // this->flush();
-    delay(5);
+/**
+ * Wakeup the bus.
+ * @return True if the bus is already awake, false if it is not and a wakeup-call was inited now or recently
+ */
+bool MarantecOpener::wakeup_bus_() {
+  if (millis() - this->last_rx_msg_ > 10 * GAP_BETWEEN_MSG_MS) {
+    // bus is not awake
+    if (millis() - this->last_wakeup_call_ > 3 * GAP_BETWEEN_MSG_MS) {
+      // if bus / motor is idle & last wakeup was some time ago send wakeup
+      ESP_LOGD(TAG, "Wakeup bus");
+      this->write_array(COMMAND_WAKEUP, 1);
+      this->last_wakeup_call_ = millis();
+      this->flush();
+      delay(5);
+    }
+    return false;
   }
+  return true;
 }
 
 void MarantecOpener::loop() {
   uint8_t data[RX_MSG_LEN];
 
+  // always check for status updates; if a message is received, one can conclude that the bus is awake
   if (read_next_msg(data)) {
-    // ESP_LOGD(TAG, "read package succ");
+    ESP_LOGD(TAG, "read package succ");
     this->process_rx_(data);  // TODO: does this take too long?
     // ESP_LOGD(TAG, "time since last send: %u",millis() - this->last_rx_msg_);
   }
@@ -243,7 +260,13 @@ void MarantecOpener::loop() {
   if (this->enqueued_command_ != COVER_OPERATION_IDLE) {
     // ESP_LOGD(TAG, "NEW COMMAND ABOUT TO BE WRITTEN!");
     // ESP_LOGD(TAG,"command needs to be send");
-    this->wakeup_bus_();
+
+    // if a command is pending, ensure the bus being awake: wakeup, wait & start over if asleep
+    if (!this->wakeup_bus_()) {
+      ESP_LOGD(TAG, " bus was not awake");
+      delay(5);
+      return;
+    }
 
     // send enqueued command
     if (millis() - this->last_rx_msg_ < 30) {
@@ -256,11 +279,10 @@ void MarantecOpener::loop() {
       uint32_t startt = millis();
       if (this->enqueued_command_ == COVER_OPERATION_OPENING) {
         this->write_array(COMMAND_OPEN, TX_MSG_LEN);
-        // this->flush();
-        //  keepalive_count=100;
+        this->flush();
       } else if (this->enqueued_command_ == COVER_OPERATION_CLOSING) {
         this->write_array(COMMAND_CLOSE, TX_MSG_LEN);
-        // this->flush();
+        this->flush();
       }
 
       ESP_LOGD(TAG, "Wrote command %s to serial..duration: %lu ms, offset after receive %lu",
