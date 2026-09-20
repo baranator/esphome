@@ -254,12 +254,10 @@ void MarantecOpener::loop() {
   if (read_next_msg(data)) {
     ESP_LOGD(TAG, "read package succ");
     this->process_rx_(data);  // TODO: does this take too long?
-    // ESP_LOGD(TAG, "time since last send: %u",millis() - this->last_rx_msg_);
   }
 
   if (this->enqueued_command_ != COVER_OPERATION_IDLE) {
-    // ESP_LOGD(TAG, "NEW COMMAND ABOUT TO BE WRITTEN!");
-    // ESP_LOGD(TAG,"command needs to be send");
+    ESP_LOGD(TAG, "NEW COMMAND ABOUT TO BE WRITTEN!");
 
     // if a command is pending, ensure the bus being awake: wakeup, wait & start over if asleep
     if (!this->wakeup_bus_()) {
@@ -267,6 +265,9 @@ void MarantecOpener::loop() {
       delay(5);
       return;
     }
+
+    delay(5);
+    ESP_LOGD(TAG, " bus is awake & ready now");
 
     // send enqueued command
     if (millis() - this->last_rx_msg_ < 30) {
@@ -360,7 +361,8 @@ void MarantecOpener::enqueue_command_(CoverOperation dir) {
     ESP_LOGD(TAG, "No change in direction, dont do anything");
   } else {
     // if the cover is moving, both open and close commands are interpreted as a
-    // stop (use close here). TODO/DONE: Maybe need to differentiate depending on was moving up or down before?
+    // need to differentiate depending on was moving up or down before?
+    // TODO: check if command during movement works
     if (dir != COVER_OPERATION_IDLE) {
       this->enqueued_command_ = dir;
     } else {
