@@ -20,10 +20,9 @@ class MarantecOpener : public cover::Cover, public Component, public uart::UARTD
   void update_();
   void control(const cover::CoverCall &call) override;
   bool is_at_target_() const;
-  void enqueue_command_(cover::CoverOperation dir);
-  void endstop_reached_(cover::CoverOperation operation);
+  void enqueue_command_(const uint8_t *cmd);
   void recompute_position_();
-  void set_current_operation_(cover::CoverOperation operation, float pos);
+  void set_current_operation_(cover::CoverOperation operation);
   void process_rx_(uint8_t *data);
   bool wakeup_bus_();
   bool read_next_msg(uint8_t *data);
@@ -36,8 +35,7 @@ class MarantecOpener : public cover::Cover, public Component, public uart::UARTD
   float target_position_{0};
   uint32_t last_rx_msg_{0};
   uint32_t last_wakeup_call_{0};
-  cover::CoverOperation last_command_{cover::COVER_OPERATION_IDLE};
-  cover::CoverOperation enqueued_command_{cover::COVER_OPERATION_IDLE};
+  const uint8_t *enqueued_command_{NULL};
   cover::CoverOperation previous_operation{cover::COVER_OPERATION_IDLE};
 };
 
